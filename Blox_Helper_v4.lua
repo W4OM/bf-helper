@@ -1,6 +1,6 @@
 -- BloxFruits_Helper_v5.lua
--- exécuteur : Delta / Fluxus / Wave / Script-Ware / Solara
--- F2 par défaut = ouvrir/fermer le menu — configs sauvegardées automatiquement
+-- exÃ©cuteur : Delta / Fluxus / Wave / Script-Ware / Solara
+-- F2 par dÃ©faut = ouvrir/fermer le menu â€” configs sauvegardÃ©es automatiquement
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -27,7 +27,7 @@ local DEFAULTS = {
     mobESP      = false, chestESP   = false, playerESP = false,
     fruitESP    = false, teamCheck  = false,
     walkSpeed   = 32,    antiAfk    = true,
-    intro       = true,
+    intro       = false,
     guiKeyName  = "RightShift",
     hakiKeyName = "H",
     _travelName = "",
@@ -35,27 +35,14 @@ local DEFAULTS = {
 
 local CFG = table.clone(DEFAULTS)
 
-local function saveCFG()
-    pcall(function()
-        writefile(SAVE_FILE, HttpService:JSONEncode(CFG))
-    end)
-end
-
-local function loadCFG()
-    pcall(function()
-        if readfile and isfile and isfile(SAVE_FILE) then
-            local data = HttpService:JSONDecode(readfile(SAVE_FILE))
-            for k, v in pairs(data) do
-                if DEFAULTS[k] ~= nil then CFG[k] = v end
-            end
-        end
-    end)
-end
+-- LITE : plus d'ecriture/lecture disque (source de crash chez certains executeurs)
+local function saveCFG() end
+local function loadCFG() end
 loadCFG()
 
 local STATE = {
     target = nil, questMob = nil, questCount = 0,
-    lastGacha = 0, status = "prêt.", paused = false,
+    lastGacha = 0, status = "prÃªt.", paused = false,
     guiOpen = true,
 }
 
@@ -82,16 +69,11 @@ local function tpTo(pos)
     r.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0))
 end
 
-if CFG.antiAfk then
-    LP.Idled:Connect(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new(0, 0))
-    end)
-end
+-- LITE : anti-AFK desactive (VirtualUser plante sur certains executeurs)
 
 -- ============================================================ SIGNALS
--- FIX v4 : :Fire() sur les signaux Roblox ne fait rien côté client.
--- On passe par firesignal / fireproximityprompt des exécuteurs.
+-- FIX v4 : :Fire() sur les signaux Roblox ne fait rien cÃ´tÃ© client.
+-- On passe par firesignal / fireproximityprompt des exÃ©cuteurs.
 local function fireSignal(sig, ...)
     if not firesignal then return false end
     local args = table.pack(...)
@@ -384,16 +366,16 @@ spawn(function()
             STATE.questMob = (mob and mob ~= "") and mob or STATE.questMob
             if cur >= need then
                 if CFG.turnIn then
-                    setStatus("rendu de quête …")
+                    setStatus("rendu de quÃªte â€¦")
                     turnInQuest()
                     task.wait(1.2)
                     STATE.questMob = nil
                 end
             else
-                setStatus(string.format("quête %d/%d — %s", cur, need, STATE.questMob or "?"))
+                setStatus(string.format("quÃªte %d/%d â€” %s", cur, need, STATE.questMob or "?"))
             end
         else
-            setStatus("recherche de quête …")
+            setStatus("recherche de quÃªte â€¦")
             acceptQuest()
             task.wait(1.5)
         end
@@ -427,7 +409,7 @@ end)
 -- ============================================================ SHOP / GACHA
 local function gachaFruit()
     if os.clock() - STATE.lastGacha < CFG.gachaDelay then return end
-    setStatus("gacha — Cousin …")
+    setStatus("gacha â€” Cousin â€¦")
     if talkTo("cousin", {"buy", "spin", "random", "gacha", "yes"}) then
         STATE.lastGacha = os.clock()
         saveCFG()
@@ -484,15 +466,15 @@ end
 
 local function travelTo(name)
     local isl = findIsland(name)
-    if not isl then setStatus("île introuvable : " .. tostring(name)) return false end
+    if not isl then setStatus("Ã®le introuvable : " .. tostring(name)) return false end
     local ok, pos = pcall(function() return isl:GetPivot().Position end)
     if not ok or not pos then
         local p = rootOf(isl) or (isl:IsA("BasePart") and isl)
         pos = p and p.Position or nil
     end
     if not pos then setStatus("pivot impossible") return false end
-    setStatus("voyage → " .. name)
-    tpTo(pos + Vector3.new(0, 6, 0))
+    setStatus("voyage â†’ " .. name)
+    tpTo(pos + Vector3.new(0, 20, 0))
     return true
 end
 
@@ -555,7 +537,7 @@ spawn(function()
                     if h and h.Health > 0 and hrp then
                         local boss = BOSS_NAMES[m.Name]
                         makeESP(hrp, boss and ESPC.boss or ESPC.mob,
-                                boss and ("★ " .. m.Name) or m.Name)
+                                boss and ("â˜… " .. m.Name) or m.Name)
                     end
                 end
             end
@@ -676,7 +658,7 @@ local function buildGUI()
     title.TextSize = 18
     title.TextColor3 = ACCENT
     title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Text = "  ◈ BLOX FRUITS HELPER"
+    title.Text = "  â—ˆ BLOX FRUITS HELPER"
     title.Parent = main
 
     local ver = Instance.new("TextLabel")
@@ -701,10 +683,7 @@ local function buildGUI()
     closeBtn.AutoButtonColor = false
     closeBtn.Parent = main
     Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 7)
-    closeBtn.MouseButton1Click:Connect(function()
-        main.Visible = false
-        STATE.guiOpen = false
-    end)
+    closeBtn.MouseButton1Click:Connect(function() main.Visible = false STATE.guiOpen = false end)
 
     -- sidebar
     local side = Instance.new("Frame")
@@ -749,7 +728,7 @@ local function buildGUI()
         s.TextSize = 11
         s.TextColor3 = MUTED
         s.TextXAlignment = Enum.TextXAlignment.Left
-        s.Text = "—  " .. string.upper(text)
+        s.Text = "â€”  " .. string.upper(text)
         s.LayoutOrder = order
         s.Parent = parent
     end
@@ -847,7 +826,7 @@ local function buildGUI()
             Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
             return b
         end
-        local minus, plus = mkBtn("−", -140), mkBtn("+", -28)
+        local minus, plus = mkBtn("âˆ’", -140), mkBtn("+", -28)
         minus.MouseButton1Click:Connect(function() set(CFG[key] - step) end)
         plus.MouseButton1Click:Connect(function() set(CFG[key] + step) end)
         return row
@@ -878,7 +857,7 @@ local function buildGUI()
         box.Font = Enum.Font.Code
         box.TextSize = 13
         box.TextColor3 = ACCENT
-        box.PlaceholderText = "…"
+        box.PlaceholderText = "â€¦"
         box.PlaceholderColor3 = MUTED
         box.Text = tostring(CFG[key] or "")
         box.ClearTextOnFocus = false
@@ -922,27 +901,25 @@ local function buildGUI()
     mkToggle(pFarm, "Auto Click", "autoClick", 3)
     mkToggle(pFarm, "Auto Haki", "autoHaki", 4)
     mkSlider(pFarm, "Rayon de cible", "farmRadius", 50, 800, 5)
-    mkSection(pFarm, "PRIORITÉS", 6)
+    mkSection(pFarm, "PRIORITÃ‰S", 6)
     mkToggle(pFarm, "Auto Boss", "autoBoss", 7)
     mkToggle(pFarm, "Auto Coffres", "autoChest", 8)
 
     local pQuest = newPage("quest")
-    mkSection(pQuest, "QUÊTES", 1)
-    mkToggle(pQuest, "Auto Quête", "autoQuest", 2)
+    mkSection(pQuest, "QUÃŠTES AUTO", 1)
+    mkToggle(pQuest, "Auto QuÃªte", "autoQuest", 2)
     mkToggle(pQuest, "Rendre automatiquement", "turnIn", 3)
-    mkButton(pQuest, "▶ Forcer l'acceptation", ACCENT2, function()
-        setStatus("acceptation …")
-        acceptQuest()
+    mkButton(pQuest, "â–¶ Forcer l'acceptation", ACCENT2, function()
+        setStatus("acceptation â€¦") acceptQuest()
     end, 4)
-    mkButton(pQuest, "▶ Forcer le rendu", GREEN, function()
-        setStatus("rendu …")
-        turnInQuest()
+    mkButton(pQuest, "â–¶ Forcer le rendu", GREEN, function()
+        setStatus("rendu â€¦") turnInQuest()
     end, 5)
 
     local pTravel = newPage("travel")
     mkSection(pTravel, "VOYAGE", 1)
-    mkInput(pTravel, "Nom de l'île", "_travelName", 2)
-    mkButton(pTravel, "◈ VOYAGER", ACCENT, function()
+    mkInput(pTravel, "Nom de l'Ã®le", "_travelName", 2)
+    mkButton(pTravel, "â—ˆ VOYAGER", ACCENT, function()
         travelTo(CFG._travelName or "")
     end, 3)
     mkSection(pTravel, "RAPIDE", 4)
@@ -956,15 +933,15 @@ local function buildGUI()
     mkSection(pShop, "GACHA / FRUITS", 1)
     mkToggle(pShop, "Auto Gacha (Cousin)", "gacha", 2)
     mkSlider(pShop, "Delay gacha (s)", "gachaDelay", 15, 300, 3)
-    mkToggle(pShop, "Auto Buy Fruit ciblé", "autoBuyFruit", 4)
+    mkToggle(pShop, "Auto Buy Fruit ciblÃ©", "autoBuyFruit", 4)
     mkInput(pShop, "Fruit voulu", "fruitWanted", 5)
-    mkButton(pShop, "▶ Acheter maintenant", ORANGE, function()
+    mkButton(pShop, "â–¶ Acheter maintenant", ORANGE, function()
         buyWantedFruit()
     end, 6)
     mkSection(pShop, "FIGHTING STYLES", 7)
     mkToggle(pShop, "Auto apprendre les styles", "autoStyles", 8)
     mkSection(pShop, "STATS", 9)
-    mkToggle(pShop, "Auto dépenser les points", "autoStats", 10)
+    mkToggle(pShop, "Auto dÃ©penser les points", "autoStats", 10)
     for i, stat in ipairs({"Melee", "Defense", "Sword", "Devil Fruit", "Gun"}) do
         mkButton(pShop, "Max : " .. stat,
                  CFG.statToMax == stat and GREEN or BG3,
@@ -996,7 +973,7 @@ local function buildGUI()
     local binding = false
     keyRow.MouseButton1Click:Connect(function()
         binding = true
-        keyRow.Text = "… appuie sur une touche"
+        keyRow.Text = "â€¦ appuie sur une touche"
         keyRow.BackgroundColor3 = ORANGE
     end)
     UserInputService.InputBegan:Connect(function(inp, gpe)
@@ -1012,34 +989,39 @@ local function buildGUI()
     mkSlider(pSet, "WalkSpeed", "walkSpeed", 16, 100, 5)
     mkSection(pSet, "DIVERS", 6)
     mkToggle(pSet, "Anti-AFK", "antiAfk", 7)
-    mkButton(pSet, "⏸ Pause / Reprise", RED, function()
+    mkButton(pSet, "â¸ Pause / Reprise", RED, function()
         STATE.paused = not STATE.paused
         setStatus(STATE.paused and "PAUSE" or "repris")
     end, 8)
-    mkButton(pSet, "✕ Nettoyer les ESP", BG3, function()
+    mkButton(pSet, "âœ• Nettoyer les ESP", BG3, function()
         for _, d in ipairs(workspace:GetDescendants()) do
             if d.Name == "BF_ESP" or d.Name == "BF_LABEL" then d:Destroy() end
         end
-        setStatus("ESP nettoyés")
+        setStatus("ESP nettoyÃ©s")
     end, 9)
-    mkButton(pSet, "↺ Reset config", BG3, function()
+    mkButton(pSet, "â†º Reset config", BG3, function()
         for k, v in pairs(DEFAULTS) do CFG[k] = v end
         saveCFG()
-        setStatus("config réinitialisée — relance le script")
+        setStatus("config rÃ©initialisÃ©e â€” relance le script")
     end, 10)
 
     -- ================= onglets
     local tabs = {
-        {"farm",     "FARM",     GREEN,   "◈"},
-        {"quest",    "QUÊTES",   ACCENT2, "◆"},
-        {"travel",   "VOYAGE",   ACCENT,  "➤"},
-        {"shop",     "SHOP",     ORANGE,  "⛁"},
-        {"esp",      "ESP",      PINK,    "◉"},
-        {"settings", "RÉGLAGES", MUTED,   "⚙"},
+        {"farm",     "FARM",     GREEN,  "â—ˆ"},
+        {"quest",    "QUÃŠTES",   ACCENT2, "â—†"},
+        {"travel",   "VOYAGE",   ACCENT, "âž¤"},
+        {"shop",     "SHOP",     ORANGE, "â›"},
+        {"esp",      "ESP",      PINK,   "â—‰"},
+        {"settings", "RÃ‰GLAGES", MUTED,  "âš™"},
     }
     local function selectTab(id)
         for name, pg in pairs(pages) do
             pg.Visible = (name == id)
+            if name == id then
+                pg.CanvasPosition = Vector2.new(0, 0)
+                pg.BackgroundTransparency = 1
+                TweenService:Create(pg, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
+            end
         end
         for _, other in ipairs(side:GetChildren()) do
             if other:IsA("TextButton") then
@@ -1094,9 +1076,9 @@ local function buildGUI()
     RunService.Heartbeat:Connect(function()
         local lvl = "?"
         pcall(function() lvl = LP.Data.Level.Value end)
-        foot.Text = string.format("Niv. %s  │  %s  │  %s  │  %s",
+        foot.Text = string.format("Niv. %s  â”‚  %s  â”‚  %s  â”‚  %s",
             tostring(lvl), STATE.status,
-            STATE.paused and "⏸ PAUSE" or "▶ actif",
+            STATE.paused and "â¸ PAUSE" or "â–¶ actif",
             tostring(CFG.guiKeyName))
     end)
 
@@ -1116,7 +1098,7 @@ local function buildGUI()
         end
     end)
 
-    -- ================= INTRO (≤ 5 s, désactivable)
+    -- ================= INTRO (â‰¤ 5 s, dÃ©sactivable)
     if CFG.intro then
         local intro = Instance.new("Frame")
         intro.Name = "Intro"
@@ -1166,8 +1148,8 @@ local function buildGUI()
         Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
         -- contenu de l'intro
-        local full = "◈ BLOX FRUITS HELPER"
-        local sub  = "v5 · chargement du menu …"
+        local full = "â—ˆ BLOX FRUITS HELPER"
+        local sub  = "v5 Â· chargement du menu â€¦"
         local chars = 0
         while chars < #full do
             chars = chars + 1
@@ -1195,7 +1177,7 @@ local function buildGUI()
         intro:Destroy()
     end
 
-    -- autosave périodique
+    -- autosave pÃ©riodique
     spawn(function()
         while task.wait(30) do saveCFG() end
     end)
@@ -1203,4 +1185,4 @@ end
 
 local ok, err = pcall(buildGUI)
 if not ok then warn("[BFH] GUI error: " .. tostring(err)) end
-print("[BFH] v5 chargé — touche : " .. CFG.guiKeyName)
+print("[BFH] v5 chargÃ© â€” touche : " .. CFG.guiKeyName)
