@@ -93,11 +93,10 @@ end
 -- FIX v4 : :Fire() sur les signaux Roblox ne fait rien côté client.
 -- On passe par firesignal / fireproximityprompt des exécuteurs.
 local function fireSignal(sig, ...)
-    if firesignal then
-        pcall(function() firesignal(sig, ...) end)
-        return true
-    end
-    return false
+    if not firesignal then return false end
+    local args = table.pack(...)
+    pcall(function() firesignal(sig, table.unpack(args, 1, args.n)) end)
+    return true
 end
 
 local function clickGuiButton(btn)
@@ -493,7 +492,7 @@ local function travelTo(name)
     end
     if not pos then setStatus("pivot impossible") return false end
     setStatus("voyage → " .. name)
-    tpTo(pos + Vector3.new(0, 20, 0))
+    tpTo(pos + Vector3.new(0, 6, 0))
     return true
 end
 
@@ -702,7 +701,10 @@ local function buildGUI()
     closeBtn.AutoButtonColor = false
     closeBtn.Parent = main
     Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 7)
-    closeBtn.MouseButton1Click:Connect(function() main.Visible = false STATE.guiOpen = false end)
+    closeBtn.MouseButton1Click:Connect(function()
+        main.Visible = false
+        STATE.guiOpen = false
+    end)
 
     -- sidebar
     local side = Instance.new("Frame")
@@ -925,14 +927,16 @@ local function buildGUI()
     mkToggle(pFarm, "Auto Coffres", "autoChest", 8)
 
     local pQuest = newPage("quest")
-    mkSection(pQuest, "QUÊTES AUTO", 1)
+    mkSection(pQuest, "QUÊTES", 1)
     mkToggle(pQuest, "Auto Quête", "autoQuest", 2)
     mkToggle(pQuest, "Rendre automatiquement", "turnIn", 3)
     mkButton(pQuest, "▶ Forcer l'acceptation", ACCENT2, function()
-        setStatus("acceptation …") acceptQuest()
+        setStatus("acceptation …")
+        acceptQuest()
     end, 4)
     mkButton(pQuest, "▶ Forcer le rendu", GREEN, function()
-        setStatus("rendu …") turnInQuest()
+        setStatus("rendu …")
+        turnInQuest()
     end, 5)
 
     local pTravel = newPage("travel")
@@ -1026,21 +1030,16 @@ local function buildGUI()
 
     -- ================= onglets
     local tabs = {
-        {"farm",     "FARM",     GREEN,  "◈"},
+        {"farm",     "FARM",     GREEN,   "◈"},
         {"quest",    "QUÊTES",   ACCENT2, "◆"},
-        {"travel",   "VOYAGE",   ACCENT, "➤"},
-        {"shop",     "SHOP",     ORANGE, "⛁"},
-        {"esp",      "ESP",      PINK,   "◉"},
-        {"settings", "RÉGLAGES", MUTED,  "⚙"},
+        {"travel",   "VOYAGE",   ACCENT,  "➤"},
+        {"shop",     "SHOP",     ORANGE,  "⛁"},
+        {"esp",      "ESP",      PINK,    "◉"},
+        {"settings", "RÉGLAGES", MUTED,   "⚙"},
     }
     local function selectTab(id)
         for name, pg in pairs(pages) do
             pg.Visible = (name == id)
-            if name == id then
-                pg.CanvasPosition = Vector2.new(0, 0)
-                pg.BackgroundTransparency = 1
-                TweenService:Create(pg, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
-            end
         end
         for _, other in ipairs(side:GetChildren()) do
             if other:IsA("TextButton") then
