@@ -1,7 +1,16 @@
--- BloxFruits_Helper_v4.1.lua
+-- BloxFruits_Helper_v4.2.lua
 -- exécuteur : Delta / Fluxus / Solara / Wave / Script-Ware
 -- coller, exécuter — F1 = cacher/afficher le menu
--- fixes : f-string → string.format | .trim() → gsub | spawn → task.spawn | ESP allégé
+--
+-- fixes v4.2 :
+--   * autoStats  : typeof(pts.Value) == "number" (corrige le crash "compare nil")
+--   * auto-Haki  : keypress direct (InputBegan:Fire() n'existe pas)
+--   * ProximityPrompt : fireproximityprompt (HoldBegin/InputHoldBegin n'existent pas)
+--   * clics UI : vrais clics mousemoveabs/mouse1click + repli VirtualInputManager
+--   * le script n'interagit plus avec sa propre GUI (clics + lecture de quête)
+--   * autoFarm : nil-check HumanoidRootPart / cible détruite
+--   * garde anti double-chargement (token + destruction ancienne GUI)
+--   * toutes les boucles s'arrêtent proprement si le script est relancé
 
 local Players                = game:GetService("Players")
 local RunService             = game:GetService("RunService")
@@ -9,10 +18,27 @@ local ReplicatedStorage      = game:GetService("ReplicatedStorage")
 local VirtualUser            = game:GetService("VirtualUser")
 local UserInputService       = game:GetService("UserInputService")
 local TweenService           = game:GetService("TweenService")
-local ProximityPromptService = game:GetService("ProximityPromptService")
 
-local LP    = Players.LocalPlayer
-local mouse = LP:GetMouse()
+local LP        = Players.LocalPlayer
+local PlayerGui = LP:WaitForChild("PlayerGui")
+local mouse     = LP:GetMouse()
+
+-- ============================================================ ANTI DOUBLE CHARGEMENT
+local TOKEN = "_BFH_v4.2_" .. os.clock() .. "_" .. math.random(1, 1e9)
+_G.__BFH_TOKEN = TOKEN
+
+local function running()
+    return _G.__BFH_TOKEN == TOKEN
+end
+
+do -- détruit l'ancienne GUI (les anciennes boucles mourront via running())
+    local old = PlayerGui:FindFirstChild("BFH")
+    if old then old:Destroy() end
+end
+
+local function ownGui()
+    return PlayerGui:FindFirstChild("BFH")
+end
 
 -- ============================================================ CONFIG
 local CFG = {
@@ -25,7 +51,7 @@ local CFG = {
     mobESP       = false, chestESP    = false, playerESP   = false,
     fruitESP     = false, teamCheck   = false,
     walkSpeed    = 32,    autoHakiKey = Enum.KeyCode.H,
-    antiAfk      = true,
+    antiAfk      = true,  autoFruit   = false,
     _travelName  = "",
 }
 
@@ -59,10 +85,20 @@ local function trim(s)
 end
 
 local function tpTo(pos)
+    if not pos then return end -- FIX : guard position nil
     local r = myRoot()
     if not r then return end
-    r.Velocity    = Vector3.new(0, 0, 0)
-    r.CFrame      = CFrame.new(pos + Vector3.new(0, 4, 0))
+    r.Velocity = Vector3.new(0, 0, 0)
+    r.CFrame   = CFrame.new(pos + Vector3.new(0, 4, 0))
+end
+
+local function isVisible(inst) -- FIX : boutons d'ancêtres invisibles ignorés
+    local p = inst
+    while p and p ~= PlayerGui do
+        if p:IsA("GuiObject") and not p.Visible then return false end
+        p = p.Parent
+    end
+    return true
 end
 
 -- anti-afk
@@ -71,6 +107,47 @@ if CFG.antiAfk then
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new(0, 0))
     end)
+end
+
+-- ============================================================ CLICS RÉELS
+-- FIX : gui.Activated:Fire() / MouseButton1Click:Fire() N'EXISTENT PAS
+-- → on simule un vrai clic souris au centre du bouton
+local function virtualClick(x, y)
+    if type(mousemoveabs) == "function" and type(mouse1click) == "function" then
+        if pcall(mousemoveabs, x, y) then
+            task.wait(0.05)
+            pcall(mouse1click)
+            return true
+        end
+    end
+    -- repli : VirtualInputManager (Delta / Fluxus / Wave)
+    local ok = pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendMouseButtonEvent(x, y, 0, true,  game, 0)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end)
+    return ok
+end
+
+local function clickInstance(inst)
+    local okP, pos = pcall(function() return inst.AbsolutePosition end)
+    local okS, siz = pcall(function() return inst.AbsoluteSize end)
+    if not okP or not okS then return false end
+
+    local saved
+    pcall(function() saved = mouse.Location end)
+
+    local done = virtualClick(pos.X + siz.X / 2, pos.Y + siz.Y / 2)
+
+    if saved then -- restaure la souris à sa position d'origine
+        pcall(function()
+            if type(mousemoveabs) == "function" then
+                mousemoveabs(saved.X, saved.Y)
+            end
+        end)
+    end
+    return done
 end
 
 -- ============================================================ DIALOGUE ENGINE
@@ -91,37 +168,55 @@ end
 
 local function triggerNPC(npc)
     if not npc then return false end
+
     local prompt = npc:FindFirstChildWhichIsA("ProximityPrompt", true)
     if prompt then
-        pcall(function() prompt:HoldBegin() end)
-        pcall(function() prompt:InputHoldBegin() end)
-        pcall(function() fireclickdetector(npc:FindFirstChildWhichIsA("ClickDetector", true)) end)
+        -- FIX : prompt:HoldBegin()/InputHoldBegin() n'existent pas
+        if type(fireproximityprompt) == "function" then
+            pcall(fireproximityprompt, prompt, 0)
+        elseif type(keypress) == "function" then
+            pcall(function()
+                keypress(prompt.KeyboardKeyCode.Value)
+                task.wait(0.12)
+                keyrelease(prompt.KeyboardKeyCode.Value)
+            end)
+        end
         return true
     end
+
     local cd = npc:FindFirstChildWhichIsA("ClickDetector", true)
-    if cd then pcall(function() fireclickdetector(cd) end) return true end
+    if cd then
+        if type(fireclickdetector) == "function" then
+            pcall(fireclickdetector, cd)
+        end
+        return true
+    end
     return false
 end
 
 local function clickButton(wantTexts, maxClicks)
     maxClicks = maxClicks or 3
     local clicked = 0
-    local playerGui = LP:WaitForChild("PlayerGui")
+    local gui = ownGui()
+
     for _ = 1, maxClicks do
         local found = false
-        for _, gui in ipairs(playerGui:GetDescendants()) do
-            if gui:IsA("TextButton") and gui.Visible then
-                local t = (gui.Text or ""):lower()
-                for _, want in ipairs(wantTexts) do
-                    if t:find(want:lower(), 1, true) and t ~= "" then
-                        pcall(function()
-                            gui.Activated:Fire()
-                            gui.MouseButton1Click:Fire()
-                        end)
-                        clicked += 1
-                        found = true
-                        task.wait(0.25)
-                        break
+        for _, btn in ipairs(PlayerGui:GetDescendants()) do
+            -- FIX : on ignore notre propre GUI (sinon on clique nos propres boutons)
+            if not (gui and btn:IsDescendantOf(gui)) and btn:IsA("TextButton")
+                and btn.Visible and isVisible(btn) then
+
+                local t = (btn.Text or ""):lower()
+                if t ~= "" then
+                    for _, want in ipairs(wantTexts) do
+                        if t:find(want:lower(), 1, true) then
+                            if clickInstance(btn) then
+                                clicked += 1
+                                found = true
+                            end
+                            task.wait(0.25)
+                            break
+                        end
                     end
                 end
             end
@@ -161,26 +256,28 @@ end
 
 local function readQuestUI()
     local playerGui = LP:WaitForChild("PlayerGui")
+    local gui = ownGui() -- FIX : ne lit pas sa propre barre de statut ("quête 1/3")
     for _, d in ipairs(playerGui:GetDescendants()) do
-        if d:IsA("TextLabel") or d:IsA("TextButton") then
-            local t  = d.Text or ""
-            local a, b = t:match("(%d+)/(%d+)")
-            if a and b then
-                local title = t:match("^(.-)%s*%(") or t:match("[Kk]ill%s+(.+)%s+%(") or ""
-                if title == "" then
-                    local p = d.Parent
-                    if p then
-                        for _, sib in ipairs(p:GetChildren()) do
-                            if sib:IsA("TextLabel") and not (sib.Text or ""):match("%d+/%d+") then
-                                title = sib.Text or title
-                                break
+        if not (gui and d:IsDescendantOf(gui)) then
+            if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Visible then
+                local t  = d.Text or ""
+                local a, b = t:match("(%d+)/(%d+)")
+                if a and b then
+                    local title = t:match("^(.-)%s*%(") or t:match("[Kk]ill%s+(.+)%s+%(") or ""
+                    if title == "" then
+                        local p = d.Parent
+                        if p then
+                            for _, sib in ipairs(p:GetChildren()) do
+                                if sib:IsA("TextLabel") and not (sib.Text or ""):match("%d+/%d+") then
+                                    title = sib.Text or title
+                                    break
+                                end
                             end
                         end
                     end
+                    local mob = trim(title:gsub("^%a+ ", ""):gsub("%s*%d*$", ""))
+                    return tonumber(a), tonumber(b), mob
                 end
-                -- FIX: .trim() n'existe pas en Lua → gsub
-                local mob = trim(title:gsub("^%a+ ", ""):gsub("%s*%d*$", ""))
-                return tonumber(a), tonumber(b), mob
             end
         end
     end
@@ -291,7 +388,7 @@ local function nearestChest()
     return best
 end
 
-local function nearestFruit()
+local function nearestFruit() -- FIX : fonction déjà écrite mais jamais utilisée
     local r = myRoot()
     if not r then return nil end
     local best, bestD = nil, 600
@@ -301,7 +398,7 @@ local function nearestFruit()
             local p = obj:FindFirstChild("Handle")
                       or obj:FindFirstChildWhichIsA("BasePart")
                       or rootOf(obj)
-            if p then
+            if p and p:IsA("BasePart") then
                 local d = dist(r.Position, p.Position)
                 if d < bestD then best, bestD = p, d end
             end
@@ -324,18 +421,23 @@ local BOSS_NAMES = {
 
 -- ============================================================ BOUCLES
 task.spawn(function()
-    while task.wait(0.18) do
+    while running() and task.wait(0.18) do
         if CFG.autoFarm and not STATE.paused and isAlive(LP) then
-            if not STATE.target
-               or not STATE.target:FindFirstChild("Humanoid")
-               or STATE.target.Humanoid.Health <= 0 then
-                STATE.target = nearestMob()
-            end
             local t = STATE.target
-            if t and rootOf(t) then
-                local d = dist(myRoot().Position, rootOf(t).Position)
-                if d > 11 then tpTo(rootOf(t).Position) end
-                if d < 14 and CFG.autoClick then
+            -- FIX : cible détruite / nil vérifiée avant accès
+            if typeof(t) ~= "Instance" or not t.Parent
+               or not t:FindFirstChild("Humanoid")
+               or t.Humanoid.Health <= 0 then
+                t = nearestMob()
+                STATE.target = t
+            end
+
+            local r   = myRoot() -- FIX : myRoot() nil-check avant .Position
+            local hrp = t and rootOf(t)
+            if r and hrp then
+                local d = dist(r.Position, hrp.Position)
+                if d > 11 then tpTo(hrp.Position) end
+                if d < 14 and CFG.autoClick and type(mouse1click) == "function" then
                     pcall(mouse1click)
                 end
             end
@@ -344,32 +446,34 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(0.8) do
+    while running() and task.wait(0.8) do
         if CFG.autoHaki and not STATE.paused and isAlive(LP) then
-            pcall(function() UserInputService.InputBegan:Fire(CFG.autoHakiKey, false) end)
-            pcall(function() keypress(CFG.autoHakiKey.Value) end)
-            task.wait(0.1)
-            pcall(function() keyrelease(CFG.autoHakiKey.Value) end)
+            -- FIX : UserInputService.InputBegan:Fire() N'EXISTE PAS (RBXScriptSignal)
+            if type(keypress) == "function" and type(keyrelease) == "function" then
+                pcall(keypress, CFG.autoHakiKey.Value)
+                task.wait(0.1)
+                pcall(keyrelease, CFG.autoHakiKey.Value)
+            end
         end
     end
 end)
 
 task.spawn(function()
-    while task.wait(1) do
+    while running() and task.wait(1) do
         if CFG.autoStats and not STATE.paused then
             local rem      = ReplicatedStorage:FindFirstChild("Remotes")
             local addPoint = rem and (rem:FindFirstChild("AddPoint") or rem:FindFirstChild("StatAdd"))
             local pts      = LP:FindFirstChild("Data") and LP.Data:FindFirstChild("Points")
-            if addPoint and pts and pts.Value > 0 then
+            -- FIX : typeof(...) == "number" → corrige "attempt to compare nil with number"
+            if addPoint and pts and typeof(pts.Value) == "number" and pts.Value > 0 then
                 pcall(function() addPoint:FireServer(CFG.statToMax, 1) end)
             end
         end
     end
 end)
 
--- FIX : f"..." remplacé par string.format
 task.spawn(function()
-    while task.wait(2) do
+    while running() and task.wait(2) do
         if not CFG.autoQuest or STATE.paused then continue end
         local cur, need, mob = readQuestUI()
         if need > 0 then
@@ -382,7 +486,6 @@ task.spawn(function()
                     STATE.questMob = nil
                 end
             else
-                -- FIX : string.format au lieu de f"..."
                 setStatus(string.format("quête %d/%d — %s", cur, need, STATE.questMob or "?"))
             end
         else
@@ -394,7 +497,7 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(3) do
+    while running() and task.wait(3) do
         if not CFG.autoBoss or STATE.paused then continue end
         for name in pairs(BOSS_NAMES) do
             local b = workspace:FindFirstChild(name)
@@ -409,11 +512,15 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(1.5) do
+    while running() and task.wait(1.5) do
         if STATE.paused then continue end
         if CFG.autoChest then
             local c = nearestChest()
-            if c then tpTo(c.Position) end
+            if c then tpTo(c.Position) setStatus("coffre …") end
+        end
+        if CFG.autoFruit then
+            local f = nearestFruit() -- FIX : fonction enfin utilisée
+            if f then tpTo(f.Position) setStatus("fruit : " .. f.Name) end
         end
     end
 end)
@@ -446,7 +553,7 @@ local function buyStyles()
 end
 
 task.spawn(function()
-    while task.wait(5) do
+    while running() and task.wait(5) do
         if STATE.paused then continue end
         if CFG.gacha        then gachaFruit()    end
         if CFG.autoBuyFruit then buyWantedFruit() end
@@ -481,8 +588,8 @@ local function travelTo(name)
     if not isl then setStatus("île introuvable : " .. name) return false end
     local ok, pos = pcall(function() return isl:GetPivot().Position end)
     if not ok or not pos then
-        local p = rootOf(isl) or isl
-        pos = p:IsA("BasePart") and p.Position or nil
+        local p = rootOf(isl) or (isl:IsA("BasePart") and isl or nil)
+        pos = p and p.Position or nil
     end
     if not pos then setStatus("pivot impossible") return false end
     setStatus("voyage → " .. name)
@@ -491,7 +598,6 @@ local function travelTo(name)
 end
 
 -- ============================================================ ESP
--- OPTIMISATION : un seul scan par objet, tag parent pour éviter GetDescendants en boucle serrée
 local ESP_COLOR = {
     mob    = Color3.fromRGB(255, 150, 0),
     boss   = Color3.fromRGB(255, 40,  40),
@@ -503,7 +609,8 @@ local ESP_COLOR = {
 local function makeESP(part, color, text)
     if not part or not part.Parent then return end
     local hl = part:FindFirstChild("BF_ESP")
-    if not hl then
+    if not hl or not hl:IsA("Highlight") then
+        if hl then hl:Destroy() end
         hl = Instance.new("Highlight")
         hl.Name               = "BF_ESP"
         hl.Adornee            = part
@@ -541,9 +648,8 @@ local function clearESP(container)
     end
 end
 
--- ESP séparé en deux boucles : mobs/joueurs (rapide) et world objects (lent)
 task.spawn(function()
-    while task.wait(1.2) do
+    while running() and task.wait(1.2) do
         if CFG.mobESP then
             for _, m in ipairs(workspace:GetChildren()) do
                 if m:IsA("Model") and m ~= myChar()
@@ -570,9 +676,8 @@ task.spawn(function()
     end
 end)
 
--- world objects (coffres, fruits) sur un tick plus lent pour ne pas massacrer le FPS
 task.spawn(function()
-    while task.wait(3) do
+    while running() and task.wait(3) do
         if not CFG.chestESP and not CFG.fruitESP then continue end
         for _, obj in ipairs(workspace:GetDescendants()) do
             if CFG.chestESP and obj.Name:lower():find("chest", 1, true) then
@@ -588,9 +693,8 @@ task.spawn(function()
     end
 end)
 
--- nettoyage quand les toggles sont coupés
 task.spawn(function()
-    while task.wait(2) do
+    while running() and task.wait(2) do
         if not CFG.mobESP then
             for _, m in ipairs(workspace:GetChildren()) do
                 if m:IsA("Model") and not Players:GetPlayerFromCharacter(m) then
@@ -608,10 +712,10 @@ end)
 
 -- ============================================================ VITESSE
 task.spawn(function()
-    while task.wait(1) do
+    while running() and task.wait(1) do
         local h = myHum()
         if h and h.WalkSpeed ~= CFG.walkSpeed then
-            h.WalkSpeed = CFG.walkSpeed
+            pcall(function() h.WalkSpeed = CFG.walkSpeed end)
         end
     end
 end)
@@ -622,7 +726,7 @@ local function buildGUI()
     gui.Name            = "BFH"
     gui.ResetOnSpawn    = false
     gui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
-    gui.Parent          = LP:WaitForChild("PlayerGui")
+    gui.Parent          = PlayerGui
 
     local main = Instance.new("Frame")
     main.Name               = "Window"
@@ -654,7 +758,7 @@ local function buildGUI()
             if inp.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
         end)
         UserInputService.InputChanged:Connect(function(inp)
-            if drag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            if drag and off and inp.UserInputType == Enum.UserInputType.MouseMovement then
                 main.Position = UDim2.new(0, inp.Position.X + off.X, 0, inp.Position.Y + off.Y)
             end
         end)
@@ -668,7 +772,7 @@ local function buildGUI()
     title.TextSize           = 18
     title.TextColor3         = Color3.fromRGB(57, 197, 207)
     title.TextXAlignment     = Enum.TextXAlignment.Left
-    title.Text               = "  ◈ BLOX FRUITS HELPER v4.1"
+    title.Text               = "  ◈ BLOX FRUITS HELPER v4.2"
     title.Parent             = main
 
     local closeBtn = Instance.new("TextButton")
@@ -900,6 +1004,7 @@ local function buildGUI()
     mkSection(pFarm, "PRIORITÉS",   6)
     mkToggle(pFarm, "Auto Boss",    "autoBoss",   7)
     mkToggle(pFarm, "Auto Coffres", "autoChest",  8)
+    mkToggle(pFarm, "Auto Fruit au sol", "autoFruit", 9)
 
     local pQuest = newPage("quest")
     mkSection(pQuest, "QUÊTES", 1)
@@ -923,8 +1028,9 @@ local function buildGUI()
         "Skylands", "Snow", "Cafe", "Mansion", "Green Zone",
         "Graveyard", "Great Tree", "Haunted Castle", "Sea 3",
     }) do
-        mkButton(pTravel, isl, Color3.fromRGB(48, 54, 61),
-            function() travelTo(isl) end, 4 + i)
+        local islandName = isl
+        mkButton(pTravel, islandName, Color3.fromRGB(48, 54, 61),
+            function() travelTo(islandName) end, 4 + i)
     end
 
     local pShop = newPage("shop")
@@ -1053,7 +1159,9 @@ local function buildGUI()
     foot.Text                = "F1 = menu"
     foot.Parent              = main
 
-    RunService.Heartbeat:Connect(function()
+    local hb -- FIX : se déconnecte si le script est relancé
+    hb = RunService.Heartbeat:Connect(function()
+        if not running() or not foot.Parent then hb:Disconnect() return end
         local lvl = "?"
         pcall(function() lvl = tostring(LP.Data.Level.Value) end)
         foot.Text = string.format(
@@ -1062,7 +1170,9 @@ local function buildGUI()
             STATE.paused and "⏸ PAUSE" or "▶ actif")
     end)
 
-    UserInputService.InputBegan:Connect(function(inp, gpe)
+    local f1
+    f1 = UserInputService.InputBegan:Connect(function(inp, gpe)
+        if not running() then f1:Disconnect() return end
         if gpe then return end
         if inp.KeyCode == Enum.KeyCode.F1 then
             main.Visible = not main.Visible
@@ -1072,4 +1182,4 @@ end
 
 local ok, err = pcall(buildGUI)
 if not ok then warn("[BFH] GUI error : " .. tostring(err)) end
-print("[BFH] v4.1 chargé — F1 = menu")
+print("[BFH] v4.2 chargé — F1 = menu")
